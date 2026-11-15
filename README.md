@@ -46,7 +46,7 @@ El proyecto abarca tres etapas de reducción matricial:
 ### 1. Reflector de Householder
 Dado un vector columna $x$, se construye el reflector unitario $v$ que anula sus componentes debajo del índice pivote:
 
-$$\alpha = -\operatorname{sgn}(x_0)\|x\|_2, \qquad u = x - \alpha e_0, \qquad v = \frac{u}{\|u\|_2}$$
+$$\alpha = -{sgn}(x_0)\|x\|_2, \qquad u = x - \alpha e_0, \qquad v = \frac{u}{\|u\|_2}$$
 
 Aprovechando la identidad $\|u\|_2^2 = 2\|x\|_2(\|x\|_2 + |x_0|)$, las versiones optimizadas de tridiagonalización calculan $\|u\|_2$ directamente sin requerir un segundo producto punto.
 
