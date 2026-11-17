@@ -137,11 +137,31 @@ __global__ void matrix_substract_kernel(double* A, double* v, double* deltas, co
     }
 }
 
-void hh_triangular(double* A, int n){
+__global__ void back_sub_div_kernel(double* A, double* b, const int i, const int n){
+    b[i] /= A[i*n+i];
+}
+
+__global__ void back_sub_update_kernel(double* A, double* b, const int i, const int n){
+    int t = blockDim.x * blockIdx.x + threadIdx.x;
+    if(t < i){
+        b[t] -= A[i*n+t] * b[i];
+    }
+}
+
+void back_substitution_dev(double* aD, double* bD, const int n){
+    for(int i=n-1; i>=0; i--){
+        back_sub_div_kernel<<<1, 1>>>(aD, bD, i, n);
+        if(i > 0){
+            int nb = (i + NT - 1) / NT;
+            back_sub_update_kernel<<<nb, NT>>>(aD, bD, i, n);
+        }
+    }
+}
+
+void hh_triangular(double* A, double* b, int n){
     double* aD, *vD, *partialD, *normaD;
     double* deltasD;
-    //double* deltaD;
-    //int j;
+    double* bD = NULL, *delta_bD = NULL;
     size_t sizem, sizev;
     int k;
     sizem = n * n * sizeof(double);
@@ -154,16 +174,12 @@ void hh_triangular(double* A, int n){
     cudaMalloc(&normaD, sizeof(double));
     cudaMemcpy(aD, A, sizem, cudaMemcpyHostToDevice);
 
-    //cudaMalloc(&deltaD, sizeof(double));
-    /*
-    for(k=0; k<n-1; k++){
-        get_v_dev(aD, vD, partialD, normaD, k, n);
-        for(j=k; j<n; j++){
-            get_delta_dev(aD, vD, partialD, deltaD, j, n);
-            column_substract_kernel<<<NB_V, NT>>>(aD, vD, deltaD, j, n);
-        }
+    if(b != NULL){
+        cudaMalloc(&bD, sizev);
+        cudaMalloc(&delta_bD, sizeof(double));
+        cudaMemcpy(bD, b, sizev, cudaMemcpyHostToDevice);
     }
-    */
+
 
     cudaMalloc(&deltasD, sizev);
 
@@ -172,6 +188,17 @@ void hh_triangular(double* A, int n){
         get_all_deltas_kernel<<<n-k, NT, NT*sizeof(double)>>>(aD, vD, deltasD, k, n);
         dim3 grid(n-k, NB_V);
         matrix_substract_kernel<<<grid, NT>>>(aD, vD, deltasD, k, n);
+        if(b != NULL){
+            get_delta_dev(bD, vD, partialD, delta_bD, 0, n);
+            column_substract_kernel<<<NB_V, NT>>>(bD, vD, delta_bD, 0, n);
+        }
+    }
+
+    if(b != NULL){
+        back_substitution_dev(aD, bD, n);
+        cudaMemcpy(b, bD, sizev, cudaMemcpyDeviceToHost);
+        cudaFree(bD);
+        cudaFree(delta_bD);
     }
 
     cudaMemcpy(A, aD, sizem, cudaMemcpyDeviceToHost);
@@ -182,6 +209,15 @@ void hh_triangular(double* A, int n){
     cudaFree(normaD);
     cudaFree(deltasD);
     //cudaFree(deltaD);
+}
+
+void print_vector(double* v, int size){
+    int big_vector = size > 9 ? 1 : 0;
+    if(big_vector) size = 9;
+    printf("[");
+    for(int i=0; i<size-1; i++) printf("%f, ", v[i]);
+    if(big_vector) printf("%f, ...]\n", v[size-1]);
+    else printf("%f]\n", v[size-1]);
 }
 
 void print_matrix(double* A, int n){
@@ -222,15 +258,28 @@ double* rand_sym_matrix(const int n){
     return A;
 }
 
+double* rand_vector(const int n){
+    double* b = (double*)malloc(n * sizeof(double));
+    for(int i=0; i<n; i++){
+        b[i] = (double)rand() / RAND_MAX * 200.0 - 100.0;
+    }
+    return b;
+}
+
 int main(int argc, char** argv){
     srand(500);
     int n = 2500;
+    int solve = 0;
 
     if(argc > 1){
         n = atoi(argv[1]);
     }
+    if(argc > 2){
+        solve = atoi(argv[2]);
+    }
 
     double* A = rand_sym_matrix(n);
+    double* b = solve ? rand_vector(n) : NULL;
     //print_matrix(A, n);
 
     cudaEvent_t start, stop;
@@ -238,7 +287,7 @@ int main(int argc, char** argv){
     cudaEventCreate(&stop);
 
     cudaEventRecord(start);
-    hh_triangular(A, n);
+    hh_triangular(A, b, n);
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
 
@@ -246,6 +295,10 @@ int main(int argc, char** argv){
     cudaEventElapsedTime(&elapsed_ms, start, stop);
 
     print_matrix(A, n);
+    if(solve){
+        printf("Solucion x:\n");
+        print_vector(b, n);
+    }
 
     printf("%d,%d,%.6f\n", n, NT, elapsed_ms / 1000.0);
 
@@ -253,5 +306,6 @@ int main(int argc, char** argv){
     cudaEventDestroy(stop);
 
     free(A);
+    if(b != NULL) free(b);
     return 0;
 }

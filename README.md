@@ -4,7 +4,7 @@ Implementación y análisis de rendimiento de transformaciones ortogonales de **
 
 El proyecto abarca tres etapas de reducción matricial:
 
-1. **Triangularización superior (`triangulo/`)**: Reducción a forma triangular superior aplicando reflectores por la izquierda ($A \leftarrow H_k A$).
+1. **Triangularización superior (`triangulo/`)**: Reducción a forma triangular superior aplicando reflectores por la izquierda ($A \leftarrow H_k A$) y resolución opcional del sistema lineal $Ax = b$ mediante sustitución hacia atrás (*back substitution*).
 2. **Forma de Hessenberg (`hessenberg/`)**: Reducción dejando una subdiagonal no nula debajo de la diagonal principal.
 3. **Tridiagonalización simétrica (`tridiagonal/`)**: Transformación por semejanza ortogonal $T = Q^T A Q$ ($A \leftarrow H_k A H_k$) explotando la simetría de $A$ mediante actualizaciones de rango 2.
 
@@ -50,10 +50,18 @@ $$\alpha = -{sgn}(x_0)\|x\|_2, \qquad u = x - \alpha e_0, \qquad v = \frac{u}{\|
 
 Aprovechando la identidad $\|u\|_2^2 = 2\|x\|_2(\|x\|_2 + |x_0|)$, las versiones optimizadas de tridiagonalización calculan $\|u\|_2$ directamente sin requerir un segundo producto punto.
 
-### 2. Triangularización superior ($A \leftarrow H_k A$)
+### 2. Triangularización superior ($A \leftarrow H_k A$) y resolución de sistemas ($Ax = b$)
 En el paso $k$, el reflector $H_k = I - 2vv^T$ actualiza cada columna $A_{:,j}$ ($j \ge k$) mediante:
 
 $$\delta_j = v^T A_{:,j}, \qquad A_{:,j} \leftarrow A_{:,j} - 2\delta_j v$$
+
+Cuando se activa la resolución del sistema lineal $Ax = b$, cada reflector se aplica simultáneamente al vector independiente $b$ para mantener la equivalencia $Rx = Q^T b$:
+
+$$\delta_b = v^T b, \qquad b \leftarrow b - 2\delta_b v$$
+
+Una vez obtenida la matriz triangular superior $R$, se despeja el vector solución $x$ mediante **sustitución hacia atrás** (*back substitution*) desde $i = n-1$ hasta $0$:
+
+$$x_i = \frac{b_i - \sum_{j=i+1}^{n-1} R_{i,j}\, x_j}{R_{i,i}}$$
 
 ### 3. Tridiagonalización simétrica ($A \leftarrow H_k A H_k$)
 Para preservar los autovalores de una matriz simétrica $A$, la transformación se aplica por ambos lados sobre la submatriz activa $(k+1 \dots n-1)$:
@@ -123,11 +131,16 @@ n,hilos_o_NT,tiempo_en_segundos
 ### Ejemplos de ejecución
 
 ```bash
-# Triangularización en CPU con n = 4000 y 8 hilos OpenMP
-./hh_superior 4000 8
+# Triangularización en CPU con n = 4000 y 8 hilos OpenMP (sin resolver sistema)
+./hh_superior 4000 8 0
 
-# Triangularización en GPU con n = 4000
-./hh_superior_cuda 4000
+# Triangularización + resolución de Ax = b (sustitución hacia atrás) en CPU
+./hh_superior 4000 8 1
+
+# Triangularización en GPU con n = 4000 (0 = solo triangularizar, 1 = resolver Ax = b)
+./hh_superior_cuda 4000 0
+./hh_superior_cuda 4000 1
+./hh_superior_cuda_serial 4000 1
 
 # Tridiagonalización en OpenMP: ./3domp <n> <hilos> <guardar_binarios: 0|1>
 ./3domp 2500 16 0

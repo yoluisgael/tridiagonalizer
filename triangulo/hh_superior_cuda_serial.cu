@@ -160,7 +160,17 @@ void get_v(double* A, double* aD, double* v, double* vD, const int k, const int 
     cudaMemcpy(vD, v, n*sizeof(double), cudaMemcpyHostToDevice);
 }
 
-void hh_triangular(double* A, int n){
+void back_substitution(double* A, double* b, const int n){
+    for(int i=n-1; i>=0; i--){
+        double suma = 0.0;
+        for(int j=i+1; j<n; j++){
+            suma += A[j*n+i] * b[j];
+        }
+        b[i] = (b[i] - suma) / A[i*n+i];
+    }
+}
+
+void hh_triangular(double* A, double* b, int n){
     double* aD, *vD, *partialD, *normaD;
     double* deltasD;
     size_t sizem, sizev;
@@ -184,9 +194,18 @@ void hh_triangular(double* A, int n){
         get_all_deltas_kernel<<<n-k, NT, NT*sizeof(double)>>>(aD, vD, deltasD, k, n);
         dim3 grid(n-k, NB_V);
         matrix_substract_kernel<<<grid, NT>>>(aD, vD, deltasD, k, n);
+        if(b != NULL){
+            double delta_b = 0.0;
+            for(int i=k; i<n; i++) delta_b += vH[i] * b[i];
+            for(int i=k; i<n; i++) b[i] -= 2.0 * delta_b * vH[i];
+        }
     }
 
     cudaMemcpy(A, aD, sizem, cudaMemcpyDeviceToHost);
+
+    if(b != NULL){
+        back_substitution(A, b, n);
+    }
 
     cudaFree(aD);
     cudaFree(vD);
@@ -195,6 +214,15 @@ void hh_triangular(double* A, int n){
     cudaFree(deltasD);
     free(aH);
     free(vH);
+}
+
+void print_vector(double* v, int size){
+    int big_vector = size > 9 ? 1 : 0;
+    if(big_vector) size = 9;
+    printf("[");
+    for(int i=0; i<size-1; i++) printf("%f, ", v[i]);
+    if(big_vector) printf("%f, ...]\n", v[size-1]);
+    else printf("%f]\n", v[size-1]);
 }
 
 void print_matrix(double* A, int n){
@@ -235,15 +263,28 @@ double* rand_sym_matrix(const int n){
     return A;
 }
 
+double* rand_vector(const int n){
+    double* b = (double*)malloc(n * sizeof(double));
+    for(int i=0; i<n; i++){
+        b[i] = (double)rand() / RAND_MAX * 200.0 - 100.0;
+    }
+    return b;
+}
+
 int main(int argc, char** argv){
     srand(500);
     int n = 2500;
+    int solve = 0;
 
     if(argc > 1){
         n = atoi(argv[1]);
     }
+    if(argc > 2){
+        solve = atoi(argv[2]);
+    }
 
     double* A = rand_sym_matrix(n);
+    double* b = solve ? rand_vector(n) : NULL;
     //print_matrix(A, n);
 
     cudaEvent_t start, stop;
@@ -251,7 +292,7 @@ int main(int argc, char** argv){
     cudaEventCreate(&stop);
 
     cudaEventRecord(start);
-    hh_triangular(A, n);
+    hh_triangular(A, b, n);
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
 
@@ -259,6 +300,10 @@ int main(int argc, char** argv){
     cudaEventElapsedTime(&elapsed_ms, start, stop);
 
     print_matrix(A, n);
+    if(solve){
+        printf("Solucion x:\n");
+        print_vector(b, n);
+    }
 
     printf("%d,%d,%.6f\n", n, NT, elapsed_ms / 1000.0);
 
@@ -266,5 +311,6 @@ int main(int argc, char** argv){
     cudaEventDestroy(stop);
 
     free(A);
+    if(b != NULL) free(b);
     return 0;
 }

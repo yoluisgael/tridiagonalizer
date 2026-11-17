@@ -64,6 +64,14 @@ double* rand_sym_matrix(const int n){
     return A;
 }
 
+double* rand_vector(const int n){
+    double* b = (double*)malloc(n * sizeof(double));
+    for(int i=0; i<n; i++){
+        b[i] = (double)rand() / RAND_MAX * 200.0 - 100.0;
+    }
+    return b;
+}
+
 double* hh_vector(double* x, const int size){
     // Norma euclidiana
     double norma = 0;
@@ -105,7 +113,7 @@ void get_v(double* A, double* v, const int k, const int n){
     for(int i=k; i<n; i++) v[i] /= norma;
 }
 
-void hh_matrix_superior(double* A, const int n){
+void hh_matrix_superior(double* A, double* b, const int n){
     double* v = (double*)calloc(n, sizeof(double));
     double delta;
     int i, j;
@@ -117,16 +125,33 @@ void hh_matrix_superior(double* A, const int n){
             //Resta de columnas
             for(i=k; i<n; i++) A[i*n+j] -= 2.0 * delta * v[i];
         }
+        if(b != NULL){
+            double delta_b = 0.0;
+            for(i=k; i<n; i++) delta_b += v[i] * b[i];
+            for(i=k; i<n; i++) b[i] -= 2.0 * delta_b * v[i];
+        }
     }
 
     free(v);
+}
+
+void back_substitution(double* A, double* b, const int n){
+    for(int i=n-1; i>=0; i--){
+        double suma = 0.0;
+        #pragma omp parallel for reduction(+:suma)
+        for(int j=i+1; j<n; j++){
+            suma += A[i*n+j] * b[j];
+        }
+        b[i] = (b[i] - suma) / A[i*n+i];
+    }
 }
 
 int main(int argc, char** argv){
     srand(500);
     int n = 2500;
     double t0, t1;
-    int n_threads = omp_get_num_threads();
+    int n_threads = omp_get_max_threads();
+    int solve = 0;
 
     if(argc > 1){
         n = atoi(argv[1]);
@@ -134,20 +159,32 @@ int main(int argc, char** argv){
     if(argc > 2){
         n_threads = atoi(argv[2]);
     }
+    if(argc > 3){
+        solve = atoi(argv[3]);
+    }
 
     omp_set_num_threads(n_threads);
 
     double* A = rand_sym_matrix(n);
+    double* b = solve ? rand_vector(n) : NULL;
     //print_matrix(A, n);
     
     t0 = omp_get_wtime();
-    hh_matrix_superior(A, n);
+    hh_matrix_superior(A, b, n);
+    if(solve){
+        back_substitution(A, b, n);
+    }
     t1 = omp_get_wtime();
 
     print_matrix(A, n);
+    if(solve){
+        printf("Solucion x:\n");
+        print_vector(b, n);
+    }
 
     printf("%d,%d,%.6f\n", n, n_threads, t1-t0);
 
     free(A);
+    if(b != NULL) free(b);
     return 0;
 }
